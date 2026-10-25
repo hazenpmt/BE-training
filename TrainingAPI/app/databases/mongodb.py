@@ -1,4 +1,7 @@
 from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError, PyMongoError
+
+from app.hooks.error import ApiInternalError
 
 from app.constants.mongodb_constants import MongoCollections
 from app.models.book import Book
@@ -18,6 +21,7 @@ class MongoDB:
         self.db = self.client[MongoDBConfig.DATABASE]
 
         self._books_col = self.db[MongoCollections.books]
+        self._users_col = self.db[MongoCollections.users]
 
     def get_books(self, filter_=None, projection=None):
         try:
@@ -51,15 +55,17 @@ class MongoDB:
             logger.exception(ex)
         return None
     
-    def delete_book_by_id(self, book_id):
+    def delete_book_by_id(self, book_id, username):
         try:
-            delete_book_id = self._books_col.delete_one({'_id':book_id})
+            delete_book_id = self._books_col.delete_one(
+                {'_id': book_id, 'owner': username}
+            )
             return delete_book_id.deleted_count
         except Exception as ex:
             logger.exception(ex)
         return None
     
-    def update_book_by_id(self, book_id, du_lieu_moi):
+    def update_book_by_id(self, book_id, du_lieu_moi, username):
         try:
             du_lieu_duoc_phep = {}
             for ten_truong in ('title', 'authors', 'publisher', 'description'):
@@ -67,7 +73,7 @@ class MongoDB:
                     du_lieu_duoc_phep[ten_truong] = du_lieu_moi[ten_truong]
 
             update_book_id = self._books_col.update_one(
-                {'_id': book_id},
+                {'_id': book_id, 'owner': username},
                 {'$set': du_lieu_duoc_phep}
             )
             return update_book_id.matched_count
@@ -76,3 +82,24 @@ class MongoDB:
         return None
     
     # TODO: write functions CRUD with books
+
+    def add_user(self, username, password_hash):
+        try:
+            self._users_col.insert_one({
+                '_id': username,
+                'username': username,
+                'password_hash': password_hash
+            })
+            return True
+        except DuplicateKeyError:
+            return False
+        except PyMongoError as ex:
+            logger.exception(ex)
+            raise ApiInternalError('Fail to create user') from ex
+
+    def get_user_by_username(self, username):
+        try:
+            return self._users_col.find_one({'_id': username})
+        except PyMongoError as ex:
+            logger.exception(ex)
+            raise ApiInternalError('Fail to get user') from ex

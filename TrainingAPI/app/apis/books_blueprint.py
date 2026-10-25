@@ -9,7 +9,7 @@ from app.databases.mongodb import MongoDB
 from app.databases.redis_cached import RedisCache
 from app.decorators.auth import protected
 from app.decorators.json_validator import validate_with_jsonschema
-from app.hooks.error import ApiInternalError
+from app.hooks.error import ApiInternalError, ApiForbidden, ApiNotFound
 from app.models.book import create_book_json_schema, Book
 
 books_bp = Blueprint('books_blueprint', url_prefix='/books')
@@ -55,7 +55,7 @@ async def get_one_book(request, book_id):
 @openapi.body({'application/json': create_book_json_schema})
 # -----
 # Middleware for validate JWT
-# @protected  # TODO: Authenticate
+@protected
 # -----
 # Validate data from request
 @validate_with_jsonschema(jsonschema=create_book_json_schema)
@@ -76,9 +76,11 @@ async def create_book(request, username=None):
     return json({'status': 'success'})
 
 @books_bp.put('/<book_id>')
+@protected
 @validate_with_jsonschema(jsonschema=create_book_json_schema)
-async def update_book(request, book_id):
-    ket_qua = _db.update_book_by_id(book_id, request.json)
+async def update_book(request, book_id, username=None):
+    require_book_owner(book_id, username)
+    ket_qua = _db.update_book_by_id(book_id, request.json, username)
     if ket_qua is None:
         raise ApiInternalError('Fail to update book')
     if ket_qua == 0:
@@ -87,8 +89,10 @@ async def update_book(request, book_id):
 
 
 @books_bp.delete('/<book_id>')
-async def delete_book_id(request, book_id):
-    ket_qua = _db.delete_book_by_id(book_id)
+@protected
+async def delete_book_id(request, book_id, username=None):
+    require_book_owner(book_id, username)
+    ket_qua = _db.delete_book_by_id(book_id, username)
     if ket_qua == 1:
         return json({"message": "Đã xóa sách"}, status = 200)
     elif ket_qua == 0:
@@ -96,4 +100,9 @@ async def delete_book_id(request, book_id):
     else:
         raise ApiInternalError('Error')
 
-# TODO: write api get, update, delete book
+def require_book_owner(book_id, username):
+    book = _db.get_book_by_id(book_id)
+    if book is None:
+        raise ApiNotFound('Book not found')
+    if book.owner != username:
+        raise ApiForbidden('Only the owner can update or delete this book')
