@@ -24,21 +24,16 @@ _db = MongoDB()
 @openapi.description('Get all books from database')
 # -----
 async def get_all_books(request):
-    # # TODO: use cache to optimize api
-    # cache: RedisCache = request.app.ctx.cache
-    # books = await cache.get(CacheConstants.all_books)
-    # if books is None:
-    #     book_objs = _db.get_books()
-    #     books = [book.to_dict() for book in book_objs]
-    #     await cache.set(CacheConstants.all_books, books)
-    book_objs = _db.get_books()
-    books = [book.to_dict() for book in book_objs]
-    # books =[]
-    # for book in book_objs:
-    #     books.append(book.to_dict())
-    number_of_books = len(books)
+    cache = request.app.ctx.cache
+    books = await cache.get(CacheConstants.all_books)
+
+    if books is None:
+        book_objs = _db.get_books()
+        books = [book.to_dict() for book in book_objs]
+        await cache.set(CacheConstants.all_books, books, expire=60)
+
     return json({
-        'n_books': number_of_books,
+        'n_books': len(books),
         'books': books
     }, ensure_ascii=False)
 

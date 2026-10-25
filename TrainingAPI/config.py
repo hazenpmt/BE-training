@@ -48,7 +48,7 @@ class RedisConfig:
     DB = int(os.getenv('REDIS_DB', 0))
     PASSWORD = os.getenv('REDIS_PASSWORD', 'pw')
 
-    CONNECTION_URL = f"redis://:{PASSWORD}@{HOST}:{PORT}/{DB}"
+    CONNECTION_URL = f"redis://{HOST}:{PORT}/{DB}"
 
 
 class LocalDBConfig:
