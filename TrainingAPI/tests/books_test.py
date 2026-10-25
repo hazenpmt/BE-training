@@ -1,138 +1,87 @@
-from main import app
-import json
-import unittest
+import datetime
 import uuid
 
-from app.databases.mongodb import MongoDB
+import jwt
+
+from tests.api_test_case import ApiTestCase
+from config import Config
 
 
-class BooksTests(unittest.TestCase):
-    """ Unit testcases for REST APIs """
+class BooksTests(ApiTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.assertEqual((await self.register()).status, 201)
+        self.headers = await self.login()
+        self.payload = {'title': 'Test book', 'authors': ['Test author'], 'publisher': 'Test publisher'}
 
-    def test_get_all_books(self):
-        request, response = app.test_client.get(
-            '/v1/books/', server_kwargs={'register_sys_signals': False}
-        )
+    async def create_book(self):
+        response = await self.request('post', '/v1/books/', json=self.payload, headers=self.headers)
+        self.assertEqual(response.status, 200, response.text)
+        book = self.database._books_col.find_one({'owner': self.username})
+        self.assertIsNotNone(book)
+        return book
+
+    async def test_create_and_public_read(self):
+        book = await self.create_book()
+        self.assertEqual(book['owner'], self.username)
+        response = await self.request('get', '/v1/books/')
         self.assertEqual(response.status, 200)
-        data = json.loads(response.text)
-        self.assertGreaterEqual(data.get('n_books'), 0)
-        self.assertIsInstance(data.get('books'), list)
-
-    def test_create_and_get_book(self):
-        payload = {
-            'title': 'Test book ' + uuid.uuid4().hex,
-            'authors': ['Test author'],
-            'publisher': 'Test publisher'
-        }
-        database = MongoDB()
-        self.addCleanup(database.client.close)
-        self.addCleanup(database._books_col.delete_many, {'title': payload['title']})
-        server_kwargs = {'register_sys_signals': False}
-
-        request, response = app.test_client.post(
-            '/v1/books/', json=payload, server_kwargs=server_kwargs
-        )
+        self.assertEqual(response.json['n_books'], 1)
+        self.assertEqual(response.json['books'][0]['_id'], book['_id'])
+        response = await self.request('get', '/v1/books/' + book['_id'])
         self.assertEqual(response.status, 200)
-        self.assertEqual(json.loads(response.text).get('status'), 'success')
+        self.assertEqual(response.json['title'], self.payload['title'])
 
-        request, response = app.test_client.get(
-            '/v1/books/', server_kwargs=server_kwargs
-        )
+    async def test_owner_can_update_and_delete(self):
+        book = await self.create_book()
+        path = '/v1/books/' + book['_id']
+        payload = dict(self.payload, title='Updated', owner='other', _id='other')
+        response = await self.request('put', path, json=payload, headers=self.headers)
+        self.assertEqual(response.status, 200, response.text)
+        saved = self.database._books_col.find_one({'_id': book['_id']})
+        self.assertEqual(saved['title'], 'Updated')
+        self.assertEqual(saved['owner'], self.username)
+        response = await self.request('delete', path, headers=self.headers)
         self.assertEqual(response.status, 200)
-        books = json.loads(response.text)['books']
-        created_books = [book for book in books if book['title'] == payload['title']]
-        self.assertEqual(len(created_books), 1)
-        book_id = created_books[0]['_id']
+        self.assertIsNone(self.database._books_col.find_one({'_id': book['_id']}))
 
-        request, response = app.test_client.get(
-            '/v1/books/' + book_id, server_kwargs=server_kwargs
-        )
-        self.assertEqual(response.status, 200)
-        book = json.loads(response.text)
-        self.assertEqual(book['_id'], book_id)
-        self.assertEqual(book['title'], payload['title'])
-        self.assertEqual(book['authors'], payload['authors'])
-        self.assertEqual(book['publisher'], payload['publisher'])
+    async def test_other_user_cannot_update_or_delete(self):
+        book = await self.create_book()
+        other = 'other_' + uuid.uuid4().hex
+        self.assertEqual((await self.register(other)).status, 201)
+        headers = await self.login(other)
+        path = '/v1/books/' + book['_id']
+        response = await self.request('put', path, json=dict(self.payload, title='Forbidden'), headers=headers)
+        self.assertEqual(response.status, 403)
+        response = await self.request('delete', path, headers=headers)
+        self.assertEqual(response.status, 403)
+        self.assertEqual(self.database._books_col.find_one({'_id': book['_id']}), book)
 
-    def test_update_book(self):
-        book_id = str(uuid.uuid4())
-        database = MongoDB()
-        self.addCleanup(database.client.close)
-        self.addCleanup(database._books_col.delete_one, {'_id': book_id})
-        database._books_col.insert_one({
-            '_id': book_id,
-            'title': 'Before update',
-            'authors': ['Original author'],
-            'publisher': 'Original publisher',
-            'owner': 'original-owner'
-        })
-        payload = {
-            'title': 'After update',
-            'authors': ['Updated author'],
-            'publisher': 'Updated publisher',
-            '_id': 'must-not-change',
-            'owner': 'must-not-change'
-        }
-        server_kwargs = {'register_sys_signals': False}
+    async def test_mutations_require_valid_token(self):
+        book = await self.create_book()
+        expired = jwt.encode({'username': self.username, 'exp': datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=10)}, Config.SECRET_KEY, algorithm='HS256')
+        forged = jwt.encode({'username': self.username}, 'wrong-test-key', algorithm='HS256')
+        for token in (None, 'invalid', expired, forged):
+            headers = {} if token is None else {'Authorization': 'Bearer ' + token}
+            for method, path, body in (('post', '/v1/books/', self.payload), ('put', '/v1/books/' + book['_id'], self.payload), ('delete', '/v1/books/' + book['_id'], None)):
+                with self.subTest(method=method, token=token):
+                    response = await self.request(method, path, json=body, headers=headers)
+                    self.assertEqual(response.status, 401, response.text)
+        self.assertEqual(self.database._books_col.count_documents({}), 1)
+        self.assertEqual(self.database._books_col.find_one({'_id': book['_id']}), book)
 
-        request, response = app.test_client.put(
-            '/v1/books/' + book_id, json=payload, server_kwargs=server_kwargs
-        )
-        self.assertEqual(response.status, 200)
+    async def test_missing_book(self):
+        path = '/v1/books/' + str(uuid.uuid4())
+        for method, body in (('get', None), ('put', self.payload), ('delete', None)):
+            with self.subTest(method=method):
+                response = await self.request(method, path, json=body, headers=self.headers)
+                self.assertEqual(response.status, 404)
 
-        request, response = app.test_client.get(
-            '/v1/books/' + book_id, server_kwargs=server_kwargs
-        )
-        self.assertEqual(response.status, 200)
-        book = json.loads(response.text)
-        self.assertEqual(book['_id'], book_id)
-        self.assertEqual(book['owner'], 'original-owner')
-        self.assertEqual(book['title'], payload['title'])
-        self.assertEqual(book['authors'], payload['authors'])
-        self.assertEqual(book['publisher'], payload['publisher'])
-
-    def test_delete_book(self):
-        book_id = str(uuid.uuid4())
-        database = MongoDB()
-        self.addCleanup(database.client.close)
-        self.addCleanup(database._books_col.delete_one, {'_id': book_id})
-        database._books_col.insert_one({
-            '_id': book_id,
-            'title': 'Book to delete',
-            'authors': ['Test author'],
-            'publisher': 'Test publisher'
-        })
-        server_kwargs = {'register_sys_signals': False}
-
-        request, response = app.test_client.delete(
-            '/v1/books/' + book_id, server_kwargs=server_kwargs
-        )
-        self.assertEqual(response.status, 200)
-        self.assertIsNone(database._books_col.find_one({'_id': book_id}))
-
-        request, response = app.test_client.delete(
-            '/v1/books/' + book_id, server_kwargs=server_kwargs
-        )
-        self.assertEqual(response.status, 404)
-
-    def test_create_book_missing_authors(self):
-        payload = {
-            'title': 'Invalid test book ' + uuid.uuid4().hex,
-            'publisher': 'Test publisher'
-        }
-        database = MongoDB()
-        self.addCleanup(database.client.close)
-        self.addCleanup(database._books_col.delete_many, {'title': payload['title']})
-
-        request, response = app.test_client.post(
-            '/v1/books/', json=payload,
-            server_kwargs={'register_sys_signals': False}
-        )
-        self.assertEqual(response.status, 400)
-        self.assertIsNone(database._books_col.find_one({'title': payload['title']}))
-
-    # TODO: unittest for another apis
-
-
-if __name__ == '__main__':
-    unittest.main()
+    async def test_invalid_book_payload(self):
+        book = await self.create_book()
+        invalid = {'title': 'Missing authors', 'publisher': 'Test'}
+        for method, path in (('post', '/v1/books/'), ('put', '/v1/books/' + book['_id'])):
+            response = await self.request(method, path, json=invalid, headers=self.headers)
+            self.assertEqual(response.status, 400)
+        self.assertEqual(self.database._books_col.count_documents({}), 1)
+        self.assertEqual(self.database._books_col.find_one({'_id': book['_id']}), book)
