@@ -5,6 +5,7 @@ from sanic.response import json
 
 from app.databases.mongodb import MongoDB
 from app.decorators.json_validator import validate_with_jsonschema
+from app.hooks.error import error_response
 from app.utils.password_utils import hash_password, verify_password
 from app.utils.jwt_utils import generate_jwt
 
@@ -34,7 +35,7 @@ async def register(request):
     created = await to_thread(_db.add_user, username, password_hash)
 
     if not created:
-        return json({'error': 'Username already exists'}, status=409)
+        return error_response(409, 'Username already exists')
 
     return json({'status': 'success', 'username': username}, status=201)
 
@@ -60,6 +61,6 @@ async def login(request):
             verify_password, request.json['password'], user.get('password_hash')
         )
     if not valid_password:
-        return json({'error': 'Invalid username or password'}, status=401)
+        return error_response(401, 'Invalid username or password')
 
     return json({'token': generate_jwt(user['username'])})

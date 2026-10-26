@@ -1,4 +1,20 @@
 from sanic.exceptions import SanicException
+from sanic.response import json
+from sanic.log import logger
+
+
+def error_response(status, message):
+    return json({'error': {'status': status, 'message': message}}, status=status)
+
+
+async def handle_api_error(request, exception):
+    status = getattr(exception, 'status_code', 500)
+    if status >= 500:
+        logger.error('Unhandled API error', exc_info=exception)
+        message = 'Internal server error'
+    else:
+        message = str(exception)
+    return error_response(status, message)
 
 
 class _ApiError(SanicException):

@@ -39,9 +39,12 @@ class Book:
 create_book_json_schema = {
     'type': 'object',
     'properties': {
-        'title': {'type': 'string'},
-        'authors': {'type': 'array', 'items': {'type': 'string'}},
-        'publisher': {'type': 'string'},
+        'title': {'type': 'string', 'pattern': r'\S'},
+        'authors': {
+            'type': 'array', 'minItems': 1,
+            'items': {'type': 'string', 'pattern': r'\S'}
+        },
+        'publisher': {'type': 'string', 'pattern': r'\S'},
         'description': {'type': 'string'},
     },
     'required': ['title', 'authors', 'publisher']

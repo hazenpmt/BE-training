@@ -34,7 +34,7 @@ class MongoDB:
             return data
         except Exception as ex:
             logger.exception(ex)
-        return []
+            raise ApiInternalError('Fail to get books') from ex
     
     def get_book_by_id(self, book_id):  
         try:
@@ -45,7 +45,7 @@ class MongoDB:
                return sach
         except Exception as ex:
             logger.exception(ex)
-        return None
+            raise ApiInternalError('Fail to get book') from ex
 
     def add_book(self, book: Book):
         try:

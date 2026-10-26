@@ -28,6 +28,11 @@ class ApiTestCase(unittest.IsolatedAsyncioTestCase):
             kwargs.pop('json', None)
         try:
             _, response = await getattr(app.asgi_client, method)(path, **kwargs)
+            if response.status >= 400:
+                self.assertEqual(set(response.json), {'error'})
+                self.assertEqual(set(response.json['error']), {'status', 'message'})
+                self.assertEqual(response.json['error']['status'], response.status)
+                self.assertIsInstance(response.json['error']['message'], str)
             return response
         finally:
             if hasattr(app.ctx, 'cache'):

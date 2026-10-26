@@ -44,8 +44,7 @@ async def get_one_book(request, book_id):
     if one_book is not None:
         return json(one_book.to_dict(), status = 200, ensure_ascii = False)
     else:
-        erro = {"error": "Không tìm thấy sách"}
-        return json(erro, status = 404)
+        raise ApiNotFound('Book not found')
     
 @books_bp.post('/')
 # Config swagger example
@@ -65,6 +64,7 @@ async def create_book(request, username=None):
 
     book_id = str(uuid.uuid4())
     book = Book(book_id).from_dict(body)
+    book._id = book_id
     book.owner = username
     # # TODO: Save book to database
     inserted = _db.add_book(book)
@@ -84,7 +84,7 @@ async def update_book(request, book_id, username=None):
     if ket_qua is None:
         raise ApiInternalError('Fail to update book')
     if ket_qua == 0:
-        return json({"error": "Không tìm thấy sách"}, status=404, ensure_ascii=False)
+        raise ApiNotFound('Book not found')
     return json({"message": "Đã cập nhật sách"}, status=200, ensure_ascii=False)
 
 
@@ -96,7 +96,7 @@ async def delete_book_id(request, book_id, username=None):
     if ket_qua == 1:
         return json({"message": "Đã xóa sách"}, status = 200)
     elif ket_qua == 0:
-        return json({"error": "Không tìm thấy sách"}, status = 404)
+        raise ApiNotFound('Book not found')
     else:
         raise ApiInternalError('Error')
 
