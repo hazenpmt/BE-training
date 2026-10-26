@@ -136,3 +136,30 @@ class MongoDB:
 
     def list_users(self):
         return list(self._users_col.find({}, {'_id': 0, 'username': 1, 'role': 1}).limit(100))
+
+    def ensure_notification_indexes(self):
+        self.db['borrows'].create_index([('status', 1), ('due_at', 1)], name='overdue_loans')
+        self.db['notifications'].create_index([('username', 1), ('created_at', -1)])
+
+    def create_overdue_notifications(self, now=None):
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        created = 0
+        cursor = self.db['borrows'].find({'status': 'active', 'due_at': {'$lt': now}})
+        for loan in cursor:
+            # A stable _id gives each loan one notification, even across retries/workers.
+            notification_id = 'overdue:' + loan['_id']
+            try:
+                result = self.db['notifications'].update_one(
+                    {'_id': notification_id},
+                    {'$setOnInsert': {
+                        'kind': 'overdue', 'borrow_id': loan['_id'],
+                        'book_id': loan['book_id'], 'username': loan['username'],
+                        'message': 'Book overdue: ' + loan.get('book_title', loan['book_id']),
+                        'created_at': now
+                    }}, upsert=True
+                )
+                created += int(result.upserted_id is not None)
+            except DuplicateKeyError:
+                # Another worker won the same notification insertion.
+                pass
+        return created

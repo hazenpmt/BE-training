@@ -67,6 +67,14 @@ class RedisCache:
         """Increment counter"""
         return await self.client.incrby(key, amount)
 
+    async def rate_limit(self, key, window):
+        # Increment and expiry must be atomic across concurrent workers.
+        return await self.client.eval('''
+            local count = redis.call('INCR', KEYS[1])
+            if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+            return {count, redis.call('TTL', KEYS[1])}
+        ''', 1, key, window)
+
     async def expire(self, key: str, seconds: int):
         """Set expiration time"""
         await self.client.expire(key, seconds)

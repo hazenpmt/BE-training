@@ -10,13 +10,18 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY')
     EXPIRATION_JWT = int(os.getenv('EXPIRATION_JWT', 3600))
     REFRESH_EXPIRATION_JWT = int(os.getenv('REFRESH_EXPIRATION_JWT', 604800))
+    RATE_LIMIT_REQUESTS = int(os.getenv('RATE_LIMIT_REQUESTS', 100))
+    AUTH_RATE_LIMIT_REQUESTS = int(os.getenv('AUTH_RATE_LIMIT_REQUESTS', 5))
+    RATE_LIMIT_WINDOW = int(os.getenv('RATE_LIMIT_WINDOW', 60))
+    RATE_LIMIT_PREFIX = 'training:rate'
+    METRICS_PREFIX = os.getenv('METRICS_PREFIX', 'training:metrics')
 
     RUN_SETTING = {
         'host': os.environ.get('SERVER_HOST', 'localhost'),
         'port': int(os.environ.get('SERVER_PORT', 8080)),
-        'debug': os.getenv('DEBUG', False),
+        'debug': os.getenv('DEBUG', 'false').lower() == 'true',
         "access_log": False,
-        "auto_reload": True,
+        "auto_reload": os.getenv('AUTO_RELOAD', 'true').lower() == 'true',
         'workers': int(os.getenv('SERVER_WORKERS', 4))
     }
     # uWSGI를 통해 배포되어야 하므로, production level에선 run setting을 건드리지 않음

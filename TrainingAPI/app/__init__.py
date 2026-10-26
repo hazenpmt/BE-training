@@ -18,14 +18,22 @@ def register_routes(sanic_app: Sanic):
     from app.apis import api
 
     sanic_app.blueprint(api)
+    from app.monitoring import monitoring
+    sanic_app.blueprint(monitoring)
 
 def register_hooks(sanic_app: Sanic):
-    from app.hooks.request_context import after_request
+    from app.hooks.request_context import after_request, limit_requests
     from app.hooks.error import handle_api_error
+    from app.monitoring import start_request_timer, record_request, start_monitoring, stop_monitoring
 
     sanic_app.error_handler.add(Exception, handle_api_error)
+    sanic_app.register_middleware(start_request_timer, 'request')
+    sanic_app.register_middleware(limit_requests, 'request')
     sanic_app.register_middleware(after_request, 'response')
+    sanic_app.register_middleware(record_request, 'response')
     sanic_app.register_listener(setup_cache, event="before_server_start")
+    sanic_app.register_listener(start_monitoring, event="before_server_start")
+    sanic_app.register_listener(stop_monitoring, event="after_server_stop")
 
 
 

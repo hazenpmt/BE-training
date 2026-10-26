@@ -1,111 +1,72 @@
-version: '3.8'
-
-# Top-level Docker Compose file for the TrainingAPI project.
-# This compose brings up the API application, a Redis service for caching, and a MongoDB service.
-# Design goals:
-# - Works when a student does NOT have MongoDB or Redis installed locally (use the bundled services).
-# - Also safe when a student DOES have MongoDB/Redis installed locally (we do not publish container's 27017 by default, so no host port conflict).
-# - The app container will use the MONGO_URI env var if provided in .env; otherwise it defaults to the internal `mongo` service.
-
-services:
+﻿services:
   app:
-    # Build the project from the repository root (context) and default Dockerfile.
     build: .
-    container_name: training-api
     restart: unless-stopped
-    # Expose the API port to the host so students can access the app at http://localhost:8080
+    env_file: .env
+    environment: &app-environment
+      MONGO_CONNECTION_URL: mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo_root}:${MONGO_INITDB_ROOT_PASSWORD:-mongo_pass}@mongo:27017/?authSource=admin
+      MONGO_DATABASE: ${MONGO_DATABASE:-example_db}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+      SERVER_WORKERS: 1
+      AUTO_RELOAD: 'false'
+      DEBUG: 'false'
+      WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-60}
     ports:
-      - "8080:8080"
-    # Mount the repository into the container so code changes on the host are reflected inside the container.
-    volumes:
-      - .:/app
-    # Load environment variables from a .env file at the project root. See .env.example for variables to set.
-    env_file:
-      - .env
-    # Ensure SanicRedis and Mongo are started before the app (note: depends_on does not wait for health checks)
+      - '127.0.0.1:${API_PORT:-8080}:8080'
     depends_on:
-      - mongo
-      - redis
-    # Provide an explicit REDIS URL so SanicRedis can find the server when init_app is called.
-    environment:
-      REDIS: "redis://redis:6379/0"
-    networks:
-      - microservice-net
-    # Optional healthcheck for the app (uncomment and adjust if your app exposes /health)
-    # healthcheck:
-    #   test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-    #   interval: 60s
-    #   timeout: 5s
-    #   retries: 5
-    #   start_period: 10s
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build: .
+    command: ['python', 'worker.py']
+    restart: unless-stopped
+    env_file: .env
+    environment: *app-environment
+    depends_on:
+      mongo:
+        condition: service_healthy
+    stop_grace_period: 40s
 
   mongo:
-    # Official MongoDB image. Pick a stable minor version for reproducibility.
     image: mongo:6.0
-    container_name: training-mongo
     restart: unless-stopped
-    # We intentionally do NOT publish 27017 to the host by default. This avoids a port conflict
-    # when the student already runs a local MongoDB on the host machine.
-    # If you need to expose the DB port for debugging, you can add an explicit port mapping in your local .env
-    # by setting MONGO_PORT_MAPPING (see .env.example) and uncommenting the `ports:` block below.
-    # ports:
-    #   - ${MONGO_PORT_MAPPING}
-    env_file:
-      - .env
     environment:
-      # These environment variables initialize the database if the container creates the DB.
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-mongo_root}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-mongo_pass}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-training_db}
-    # Persist data on the host so container restarts don't lose the DB.
     volumes:
-      - ./data/mongo:/data/db
-    networks:
-      - microservice-net
-    # Optional healthcheck to ensure Mongo is accepting connections. Compose will use this to mark the container healthy.
+      - mongo-data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "mongo --eval \"db.adminCommand('ping')\" --username $${MONGO_INITDB_ROOT_USERNAME} --password $${MONGO_INITDB_ROOT_PASSWORD} --quiet"]
-      interval: 10s
+      test: ['CMD-SHELL', 'mongosh --quiet --username "$${MONGO_INITDB_ROOT_USERNAME}" --password "$${MONGO_INITDB_ROOT_PASSWORD}" --authenticationDatabase admin --eval "db.adminCommand({ping:1}).ok"']
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 20
 
   redis:
     image: redis:7.2-alpine
-    container_name: training-redis
     restart: unless-stopped
-    env_file:
-      - .env
-    # Do not publish redis port by default (avoid conflict with host redis). Use MONGO_PORT_MAPPING style if needed.
-    # ports:
-    #   - "6382:6379"
+    command: ['redis-server', '--appendonly', 'yes']
     volumes:
-      - ./data/redis:/data
-    networks:
-      - microservice-net
+      - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-# Define a network to isolate the stack. Services can reach each other by service name (e.g. `mongo`, `redis`).
-networks:
-  microservice-net:
-    driver: bridge
-
-# How the app should connect to services at runtime (explanation, not a YAML key):
-# - By default, the app inside Docker uses the internal mongo service: mongodb://mongo:27017/${MONGO_INITDB_DATABASE}
-# - The app's REDIS config is set to "redis://redis:6379/0" inside docker-compose so SanicRedis can initialize correctly.
-# - If you (the student) already run Mongo locally and want the containerized app to talk to that host Mongo,
-#   set MONGO_URI in your .env to something like: mongodb://host.docker.internal:27017/<your_db>
-#   On Linux, `host.docker.internal` is supported on recent Docker versions. If it's not available you can use the
-#   host's IP address (e.g., 172.17.0.1) or run the app outside of Docker and point it to localhost.
-# Example .env keys (see .env.example file):
-#   MONGO_INITDB_ROOT_USERNAME=mongo_root
-#   MONGO_INITDB_ROOT_PASSWORD=mongo_pass
-#   MONGO_INITDB_DATABASE=training_db
-#   # Optional override to force the app to use an external Mongo instance instead of the bundled container:
-#   MONGO_URI=mongodb://host.docker.internal:27017/training_db
-#   # Optional: MONGO_PORT_MAPPING=27017:27017  # uncomment the ports block above to enable publishing
+volumes:
+  mongo-data:
+  redis-data:

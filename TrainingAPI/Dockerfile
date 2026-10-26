@@ -1,5 +1,4 @@
-# Use a lightweight official Python image. Choose 3.10 to match repository pyc artifacts.
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # Do not generate .pyc files and ensure stdout/stderr are unbuffered (useful for container logs).
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -30,6 +29,11 @@ EXPOSE 8080
 # Default environment variables (can be overridden via docker-compose or .env)
 ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=8080
+ENV AUTO_RELOAD=false
+ENV SERVER_WORKERS=1
+
+RUN useradd --create-home training && chown -R training:training /app
+USER training
 
 # Command to run the Sanic application. Using `python main.py` which calls app.run(...)
 # For production you may want to use a process manager or gunicorn with sanic workers.
