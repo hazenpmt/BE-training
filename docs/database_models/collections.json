@@ -4,7 +4,8 @@
     "document_fields": {
       "_id": "{uuid}",
       "title": "Title of the book",
-      "authors": "List of book's authors",
+      "authors": "Denormalized display names of authors",
+      "author_ids": "List of UUID references to authors._id",
       "publisher": "Book publisher",
       "description": "(Optional) Short description of the book's content",
       "owner": "(Optional) User add book to the system",
@@ -17,7 +18,28 @@
     "document_fields": {
       "_id": "{username}",
       "username": "Username of user",
-      "password": "Hash of user's password"
+      "password_hash": "PBKDF2 hash of user's password"
+    }
+  },
+  "Authors": {
+    "collection_name": "authors",
+    "document_fields": {
+      "_id": "UUID",
+      "name": "Display name",
+      "name_key": "Whitespace-normalized, casefolded name; unique for this exercise"
+    }
+  },
+  "Borrows": {
+    "collection_name": "borrows",
+    "document_fields": {
+      "_id": "UUID",
+      "book_id": "Reference to books._id",
+      "username": "Reference to users._id",
+      "book_title": "Title snapshot retained for history",
+      "borrowed_at": "UTC BSON datetime",
+      "due_at": "UTC BSON datetime",
+      "returned_at": "UTC BSON datetime or null",
+      "status": "active or returned; at most one active loan per book"
     }
   }
 }

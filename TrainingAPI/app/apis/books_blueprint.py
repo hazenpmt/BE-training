@@ -6,6 +6,7 @@ from sanic_ext import openapi, validate
 
 from app.constants.cache_constants import CacheConstants
 from app.databases.mongodb import MongoDB
+from app.databases.library import LibraryDB
 from app.databases.redis_cached import RedisCache
 from app.decorators.auth import protected
 from app.decorators.json_validator import validate_with_jsonschema
@@ -15,6 +16,7 @@ from app.models.book import create_book_json_schema, Book
 books_bp = Blueprint('books_blueprint', url_prefix='/books')
 
 _db = MongoDB()
+_library = LibraryDB()
 
 
 @books_bp.get('/')
@@ -24,6 +26,10 @@ _db = MongoDB()
 @openapi.description('Get all books from database')
 # -----
 async def get_all_books(request):
+    author_id = request.args.get('author_id')
+    if author_id:
+        books = [book.to_dict() for book in _db.get_books({'author_ids': author_id})]
+        return json({'n_books': len(books), 'books': books}, ensure_ascii=False)
     cache = request.app.ctx.cache
     books = await cache.get(CacheConstants.all_books)
 
@@ -66,10 +72,12 @@ async def create_book(request, username=None):
     book = Book(book_id).from_dict(body)
     book._id = book_id
     book.owner = username
+    book.author_ids = _library.resolve_authors(body['authors'])
     # # TODO: Save book to database
     inserted = _db.add_book(book)
     if not inserted:
         raise ApiInternalError('Fail to create book')
+    await request.app.ctx.cache.delete(CacheConstants.all_books)
 
     # TODO: Update cache
 
@@ -80,11 +88,14 @@ async def create_book(request, username=None):
 @validate_with_jsonschema(jsonschema=create_book_json_schema)
 async def update_book(request, book_id, username=None):
     require_book_owner(book_id, username)
-    ket_qua = _db.update_book_by_id(book_id, request.json, username)
+    changes = dict(request.json)
+    changes['author_ids'] = _library.resolve_authors(changes['authors'])
+    ket_qua = _db.update_book_by_id(book_id, changes, username)
     if ket_qua is None:
         raise ApiInternalError('Fail to update book')
     if ket_qua == 0:
         raise ApiNotFound('Book not found')
+    await request.app.ctx.cache.delete(CacheConstants.all_books)
     return json({"message": "Đã cập nhật sách"}, status=200, ensure_ascii=False)
 
 
@@ -94,6 +105,7 @@ async def delete_book_id(request, book_id, username=None):
     require_book_owner(book_id, username)
     ket_qua = _db.delete_book_by_id(book_id, username)
     if ket_qua == 1:
+        await request.app.ctx.cache.delete(CacheConstants.all_books)
         return json({"message": "Đã xóa sách"}, status = 200)
     elif ket_qua == 0:
         raise ApiNotFound('Book not found')

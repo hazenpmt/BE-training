@@ -1,4 +1,5 @@
 from pymongo import MongoClient
+import datetime
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app.hooks.error import ApiInternalError
@@ -22,6 +23,7 @@ class MongoDB:
 
         self._books_col = self.db[MongoCollections.books]
         self._users_col = self.db[MongoCollections.users]
+        self._sessions_col = self.db['auth_sessions']
 
     def get_books(self, filter_=None, projection=None):
         try:
@@ -68,7 +70,7 @@ class MongoDB:
     def update_book_by_id(self, book_id, du_lieu_moi, username):
         try:
             du_lieu_duoc_phep = {}
-            for ten_truong in ('title', 'authors', 'publisher', 'description'):
+            for ten_truong in ('title', 'authors', 'author_ids', 'publisher', 'description'):
                 if ten_truong in du_lieu_moi:
                     du_lieu_duoc_phep[ten_truong] = du_lieu_moi[ten_truong]
 
@@ -88,7 +90,8 @@ class MongoDB:
             self._users_col.insert_one({
                 '_id': username,
                 'username': username,
-                'password_hash': password_hash
+                'password_hash': password_hash,
+                'role': 'user'
             })
             return True
         except DuplicateKeyError:
@@ -103,3 +106,33 @@ class MongoDB:
         except PyMongoError as ex:
             logger.exception(ex)
             raise ApiInternalError('Fail to get user') from ex
+
+    def ensure_session_index(self):
+        self._sessions_col.create_index('expires_at', expireAfterSeconds=0)
+
+    def save_session(self, session_id, username, access, refresh):
+        self._sessions_col.insert_one({
+            '_id': session_id, 'username': username, 'active': True,
+            'access_jti': access['jti'], 'refresh_jti': refresh['jti'],
+            'expires_at': datetime.datetime.fromtimestamp(refresh['exp'], datetime.timezone.utc)
+        })
+
+    def get_session(self, session_id):
+        return self._sessions_col.find_one({'_id': session_id, 'active': True})
+
+    def rotate_session(self, old, access, refresh):
+        result = self._sessions_col.update_one(
+            {'_id': old['sid'], 'username': old['username'],
+             'active': True, 'refresh_jti': old['jti']},
+            {'$set': {'access_jti': access['jti'], 'refresh_jti': refresh['jti'],
+                      'expires_at': datetime.datetime.fromtimestamp(refresh['exp'], datetime.timezone.utc)}}
+        )
+        return result.matched_count == 1
+
+    def revoke_session(self, session_id, username):
+        self._sessions_col.update_one(
+            {'_id': session_id, 'username': username}, {'$set': {'active': False}}
+        )
+
+    def list_users(self):
+        return list(self._users_col.find({}, {'_id': 0, 'username': 1, 'role': 1}).limit(100))

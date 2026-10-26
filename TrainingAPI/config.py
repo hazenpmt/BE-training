@@ -9,6 +9,7 @@ load_dotenv()
 class Config:
     SECRET_KEY = os.getenv('SECRET_KEY')
     EXPIRATION_JWT = int(os.getenv('EXPIRATION_JWT', 3600))
+    REFRESH_EXPIRATION_JWT = int(os.getenv('REFRESH_EXPIRATION_JWT', 604800))
 
     RUN_SETTING = {
         'host': os.environ.get('SERVER_HOST', 'localhost'),

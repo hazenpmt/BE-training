@@ -6,6 +6,7 @@ class Book:
         self._id = _id
         self.title = ''
         self.authors = []
+        self.author_ids = []
         self.publisher = ''
         self.description = None
         self.owner = None
@@ -17,6 +18,7 @@ class Book:
             '_id': self._id,
             'title': self.title,
             'authors': self.authors,
+            'author_ids': self.author_ids,
             'publisher': self.publisher,
             'description': self.description,
             'owner': self.owner,
@@ -28,6 +30,7 @@ class Book:
         self._id = json_dict.get('_id', self._id)
         self.title = json_dict.get('title', '')
         self.authors = json_dict.get('authors', [])
+        self.author_ids = json_dict.get('author_ids', [])
         self.publisher = json_dict.get('publisher', '')
         self.description = json_dict.get('description')
         self.owner = json_dict.get('owner')
