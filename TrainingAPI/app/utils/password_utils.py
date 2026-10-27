@@ -14,7 +14,7 @@ def hash_password(password):
 def verify_password(password, password_hash):
     try:
         algorithm, iterations, salt_hex, digest_hex = password_hash.split('$')
-        if algorithm != 'pbkdf2_sha256' or int(iterations) != 600000:
+        if algorithm != 'pbkdf2_sha256':
             return False
         salt = bytes.fromhex(salt_hex)
         expected_digest = bytes.fromhex(digest_hex)
