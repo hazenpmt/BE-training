@@ -27,6 +27,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 15
     env:
+      SERVER_NAME: localhost:8080
       SECRET_KEY: ci-only-key-not-for-deployment
       MONGO_CONNECTION_URL: mongodb://127.0.0.1:27017/
       MONGO_DATABASE: training_ci
